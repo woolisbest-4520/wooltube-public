@@ -181,6 +181,24 @@
             min-width: 100px;
         }
 
+        .quality-controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .quality-controls button {
+            min-width: 120px;
+            padding: 12px 20px;
+            font-size: 14px;
+        }
+
+        .quality-controls button.active {
+            background: linear-gradient(135deg, #4CAF50 0%, #388E3C 100%);
+            box-shadow: 0 3px 10px rgba(76,175,80,0.4);
+        }
+
         .results {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -350,11 +368,7 @@
                 <button onclick="downloadVideo('video')" id="btnDownloadVideo">📥 動画DL</button>
                 <button onclick="downloadVideo('audio')" id="btnDownloadAudio">🎵 音声DL</button>
             </div>
-            <div class="controls" id="qualityControls" style="display: none;">
-                <button onclick="changeQuality('best')">最高画質</button>
-                <button onclick="changeQuality('high')">高画質</button>
-                <button onclick="changeQuality('medium')">中画質</button>
-            </div>
+            <div class="quality-controls" id="qualityControls" style="display: none;"></div>
             <div class="stream-url" id="streamUrl"></div>
             <div style="margin-top: 10px; padding: 10px; background: #1a1a1a; border-radius: 5px; color: #00ff00; font-family: monospace; font-size: 11px; max-height: 200px; overflow-y: auto; display: none;" id="debugLog"></div>
         </div>
@@ -371,6 +385,7 @@
         let availableStreams = [];
         let currentPlayMode = 'embed';
         let debugMessages = [];
+        let currentQuality = null;
         
         function addDebug(msg) {
             debugMessages.push(`[${new Date().toLocaleTimeString()}] ${msg}`);
@@ -820,7 +835,7 @@
                 getUrl: (server, videoId) => server,
                 parseResponse: (data) => {
                     if (!data.links || !data.links.mp4) return [];
-                    const streams = [];
+                  const streams = [];
                     Object.entries(data.links.mp4).forEach(([quality, info]) => {
                         if (info.url) {
                             streams.push({
@@ -1091,6 +1106,7 @@
             currentVideoId = videoId;
             availableStreams = [];
             debugMessages = [];
+            currentQuality = null;
             
             addDebug(`🎬 動画ID: ${videoId}`);
             addDebug(`📝 タイトル: ${title}`);
@@ -1120,6 +1136,10 @@
                     addDebug(`📊 API: ${streams[0].type}`);
                     addDebug(`🎚️ 画質: ${streams.map(s => s.quality).join(', ')}`);
                     showInfo(`ストリーム再生が利用可能です（${streams[0].type}）`);
+                    
+                    // ストリーム取得後、自動的にストリーム再生モードに切り替え
+                    addDebug('🚀 自動的にストリーム再生を開始します');
+                    setPlayMode('stream');
                 } else {
                     btnStream.disabled = true;
                     btnStream.textContent = '🎬 利用不可';
@@ -1239,8 +1259,13 @@
                 
                 addDebug(`📺 video要素を作成`);
                 playerContainer.innerHTML = '<video id="player" controls autoplay style="width:100%;height:100%;"></video>';
-                qualityControls.style.display = 'flex';
-                changeQuality('best');
+                qualityControls.style.display = 'grid';
+                
+                // 画質オプションを動的に生成
+                createQualityButtons();
+                
+                // 最高画質で自動再生
+                playBestQuality();
                 return;
             }
 
@@ -1278,20 +1303,99 @@
             addDebug(`✅ 埋め込み完了: ${embedUrl}`);
         }
 
+        function createQualityButtons() {
+            const qualityControls = document.getElementById('qualityControls');
+            qualityControls.innerHTML = '';
+            
+            // 音声付きストリームを優先
+            const audioStreams = availableStreams.filter(s => s.hasAudio);
+            const sortableStreams = audioStreams.length > 0 ? audioStreams : availableStreams;
+            
+            // 画質ごとにグループ化
+            const qualityMap = new Map();
+            sortableStreams.forEach(stream => {
+                const quality = String(stream.quality);
+                if (!qualityMap.has(quality)) {
+                    qualityMap.set(quality, stream);
+                }
+            });
+            
+            // 画質を数値でソート
+            const sortedQualities = Array.from(qualityMap.entries()).sort((a, b) => {
+                const getQualityValue = (q) => {
+                    const match = q.match(/(\d+)/);
+                    return match ? parseInt(match[1]) : 0;
+                };
+                return getQualityValue(b[0]) - getQualityValue(a[0]);
+            });
+            
+            addDebug(`🎚️ ${sortedQualities.length}個の画質オプションを生成`);
+            
+            // 各画質のボタンを作成
+            sortedQualities.forEach(([quality, stream], index) => {
+                const button = document.createElement('button');
+                button.textContent = `${quality} ${stream.hasAudio ? '🔊' : '🔇'}`;
+                button.onclick = () => changeQualityByIndex(index);
+                button.dataset.index = index;
+                qualityControls.appendChild(button);
+            });
+        }
+
+        function playBestQuality() {
+            changeQualityByIndex(0);
+        }
+
+        function changeQualityByIndex(index) {
+            const audioStreams = availableStreams.filter(s => s.hasAudio);
+            const sortableStreams = audioStreams.length > 0 ? audioStreams : availableStreams;
+            
+            // 画質ごとにグループ化
+            const qualityMap = new Map();
+            sortableStreams.forEach(stream => {
+                const quality = String(stream.quality);
+                if (!qualityMap.has(quality)) {
+                    qualityMap.set(quality, stream);
+                }
+            });
+            
+            // 画質を数値でソート
+            const sortedQualities = Array.from(qualityMap.entries()).sort((a, b) => {
+                const getQualityValue = (q) => {
+                    const match = q.match(/(\d+)/);
+                    return match ? parseInt(match[1]) : 0;
+                };
+                return getQualityValue(b[0]) - getQualityValue(a[0]);
+            });
+            
+            if (index >= sortedQualities.length) {
+                addDebug('❌ 無効なインデックス');
+                return;
+            }
+            
+            const [quality, selectedStream] = sortedQualities[index];
+            currentQuality = quality;
+            
+            // ボタンのアクティブ状態を更新
+            const qualityControls = document.getElementById('qualityControls');
+            const buttons = qualityControls.querySelectorAll('button');
+            buttons.forEach((btn, i) => {
+                if (i === index) {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
+                }
+            });
+            
+            playStream(selectedStream);
+        }
+
         function changeQuality(qualityLevel) {
             if (availableStreams.length === 0) return;
-
-            const player = document.getElementById('player');
-            const streamUrl = document.getElementById('streamUrl');
             
             addDebug(`\n🎚️ 画質変更: ${qualityLevel}`);
             
             const audioStreams = availableStreams.filter(s => s.hasAudio);
             const sortableStreams = audioStreams.length > 0 ? audioStreams : availableStreams;
-            
-            addDebug(`音声付き: ${audioStreams.length}個, 全体: ${availableStreams.length}個`);
-            
-            let selectedStream;
             
             const sortedStreams = [...sortableStreams].sort((a, b) => {
                 const getQualityValue = (q) => {
@@ -1301,8 +1405,8 @@
                 return getQualityValue(b.quality) - getQualityValue(a.quality);
             });
 
-            addDebug(`利用可能な画質: ${sortedStreams.map(s => s.quality).join(', ')}`);
-
+            let selectedStream;
+            
             switch(qualityLevel) {
                 case 'best':
                     selectedStream = sortedStreams[0];
@@ -1321,22 +1425,33 @@
                     break;
             }
 
-            if (selectedStream && selectedStream.url) {
-                addDebug(`✅ 選択: ${selectedStream.quality} (${selectedStream.hasAudio ? '音声あり' : '音声なし'})`);
-                addDebug(`🔗 URL: ${selectedStream.url.substring(0, 80)}...`);
-                
-                player.src = selectedStream.url;
-                player.play().then(() => {
-                    addDebug('▶️ 再生開始');
-                }).catch(e => {
-                    addDebug(`❌ 再生エラー: ${e.message}`);
-                    showError('ストリームの再生に失敗しました');
-                });
-                streamUrl.textContent = `画質: ${selectedStream.quality} | API: ${selectedStream.type} ${selectedStream.hasAudio ? '🔊' : '🔇'}`;
-            } else {
+            if (selectedStream) {
+                playStream(selectedStream);
+            }
+        }
+
+        function playStream(stream) {
+            const player = document.getElementById('player');
+            const streamUrl = document.getElementById('streamUrl');
+            
+            if (!stream || !stream.url) {
                 addDebug('❌ ストリームの選択に失敗');
                 showError('ストリームの読み込みに失敗しました');
+                return;
             }
+            
+            addDebug(`✅ 選択: ${stream.quality} (${stream.hasAudio ? '音声あり' : '音声なし'})`);
+            addDebug(`🔗 URL: ${stream.url.substring(0, 80)}...`);
+            
+            player.src = stream.url;
+            player.play().then(() => {
+                addDebug('▶️ 再生開始');
+            }).catch(e => {
+                addDebug(`❌ 再生エラー: ${e.message}`);
+                showError('ストリームの再生に失敗しました');
+            });
+            
+            streamUrl.textContent = `画質: ${stream.quality} | API: ${stream.type} ${stream.hasAudio ? '🔊' : '🔇'}`;
         }
 
         async function downloadVideo(type) {
